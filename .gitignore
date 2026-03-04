@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+
+# Bun
+.bun/
+
+# Build and cache
+*.tsbuildinfo
+
+# Local runtime data
+apps/api/data/
+
+# Environment files
+.env.local
+.env.*.local
+.env

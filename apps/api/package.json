@@ -1,0 +1,28 @@
+{
+  "name": "api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "build": "tsc --noEmit",
+    "start": "bun run src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run src/db/migrate.ts"
+  },
+  "exports": {
+    "./app": "./src/app.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.6",
+    "evlog": "^2.1.0",
+    "hono": "^4.9.7",
+    "nanoid": "^5.1.6",
+    "openid-client": "^5.7.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.5",
+    "typescript": "~5.9.3"
+  }
+}

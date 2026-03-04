@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1772769853975,
+      "tag": "0000_demonic_triton",
+      "breakpoints": true
+    }
+  ]
+}
