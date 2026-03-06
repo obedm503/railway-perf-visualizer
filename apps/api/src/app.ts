@@ -25,17 +25,19 @@ type Variables = {
 
 const serveWebStatic = serveStatic({
   root: webDistPath,
-  rewriteRequestPath: (path) => (path === "/" ? "/index.html" : path),
+  rewriteRequestPath(path) {
+    return path === "/" ? "/index.html" : path;
+  },
 });
 const serveWebFallback = serveStatic({
   root: webDistPath,
   path: "/index.html",
 });
 
-const requestLoggingMiddleware = async (
+async function requestLoggingMiddleware(
   c: Context<{ Variables: Variables }>,
   next: Next,
-) => {
+) {
   const startedAt = Date.now();
   const log = createRequestLogger({
     method: c.req.method,
@@ -56,7 +58,7 @@ const requestLoggingMiddleware = async (
       duration: Date.now() - startedAt,
     });
   }
-};
+}
 
 export const app = new Hono<{ Variables: Variables }>()
   .use("/_health", requestLoggingMiddleware)
@@ -68,7 +70,7 @@ export const app = new Hono<{ Variables: Variables }>()
   .use(
     "/api/*",
     cors({
-      origin: (origin) => {
+      origin(origin) {
         if (!origin) {
           return env.WEB_ORIGIN;
         }

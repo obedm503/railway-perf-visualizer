@@ -10,31 +10,32 @@ const apiClient = hc<AppType>(apiOrigin, {
   },
 });
 
-export const authLoginUrl = (callbackURL: string): string => {
+export function authLoginUrl(callbackURL: string): string {
   const search = new URLSearchParams({
     callbackURL,
   });
 
   return `${apiOrigin}/api/auth/login?${search.toString()}`;
-};
+}
 
-export const fetchMe = async () => {
+export async function fetchMe() {
   const response = await apiClient.api.me.$get();
   if (!response.ok) {
     return null;
   }
 
   return await response.json();
-};
+}
 
-export const logout = async (): Promise<void> => {
+export async function logout(): Promise<void> {
   await apiClient.api.auth.logout.$post();
-};
+}
 
-export const meQueryOptions = () =>
-  ({
+export function meQueryOptions() {
+  return {
     queryKey: ["me"],
     queryFn: fetchMe,
     staleTime: 30_000,
     retry: false,
-  }) as const;
+  } as const;
+}

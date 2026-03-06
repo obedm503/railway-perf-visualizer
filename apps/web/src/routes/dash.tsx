@@ -3,7 +3,7 @@ import { Link, createFileRoute, redirect } from "@tanstack/solid-router";
 import { meQueryOptions } from "../lib/api";
 
 export const Route = createFileRoute("/dash")({
-  beforeLoad: async ({ context }) => {
+  async beforeLoad({ context }) {
     const me = await context.queryClient.ensureQueryData(meQueryOptions());
     if (!me) {
       throw redirect({ to: "/" });
