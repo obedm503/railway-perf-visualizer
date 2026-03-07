@@ -10,6 +10,7 @@ import {
   type UserRow,
 } from "./db/schema";
 import { env } from "./env";
+import { log } from "evlog";
 
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
@@ -185,8 +186,10 @@ export const auth = {
     "openid",
     "email",
     "profile",
+    "offline_access",
     "workspace:viewer",
-    "project:viewer",
+    // "project:viewer",
+    "project:member",
   ].join(" "),
 
   sessionMaxAgeSeconds: SESSION_TTL_SECONDS,
@@ -217,6 +220,7 @@ export const auth = {
       state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
+      prompt: "consent", // set to include a refresh token
     });
   },
 
@@ -252,6 +256,7 @@ export const auth = {
         code_verifier: storedState.codeVerifier,
       },
     );
+    log.info({ handleCallback: { tokenSet } });
 
     const profile = await resolveProfile(client, tokenSet);
     const user = await upsertIdentityAndUser(profile, tokenSet);
@@ -300,5 +305,58 @@ export const auth = {
       return;
     }
     await db.delete(sessions).where(eq(sessions.id, sessionId));
+  },
+
+  async getAccessToken(userId: string): Promise<string | null> {
+    const identity = await db.query.identities.findFirst({
+      where: and(
+        eq(identities.userId, userId),
+        eq(identities.provider, PROVIDER),
+      ),
+    });
+
+    console.log("getAccessToken", { identity });
+    if (!identity?.accessToken) {
+      return null;
+    }
+
+    const bufferMs = 60_000;
+    if (
+      !identity.expiresAt ||
+      identity.expiresAt.getTime() - bufferMs > Date.now()
+    ) {
+      return identity.accessToken;
+    }
+
+    if (!identity.refreshToken) {
+      return null;
+    }
+
+    try {
+      const client = await getOidcClient();
+      const tokenSet = await client.refresh(identity.refreshToken);
+      console.log("getAccessToken", { tokenSet });
+
+      if (!tokenSet.access_token) {
+        return null;
+      }
+
+      await db
+        .update(identities)
+        .set({
+          accessToken: tokenSet.access_token,
+          refreshToken: tokenSet.refresh_token ?? identity.refreshToken,
+          expiresAt: getTokenExpiry(tokenSet),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(identities.userId, userId), eq(identities.provider, PROVIDER)),
+        );
+
+      return tokenSet.access_token;
+    } catch (e) {
+      log.error({ error: e });
+      return null;
+    }
   },
 };

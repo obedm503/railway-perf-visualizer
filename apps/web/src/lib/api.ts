@@ -21,7 +21,7 @@ export function authLoginUrl(callbackURL: string): string {
 export async function fetchMe() {
   const response = await apiClient.api.me.$get();
   if (!response.ok) {
-    return null;
+    throw new Error("Failed to fetch");
   }
 
   return await response.json();
@@ -35,7 +35,43 @@ export function meQueryOptions() {
   return {
     queryKey: ["me"],
     queryFn: fetchMe,
-    staleTime: 30_000,
-    retry: false,
+  } as const;
+}
+
+export async function fetchWorkspaces() {
+  const response = await apiClient.api.me.workspaces.$get();
+  if (!response.ok) {
+    throw new Error("Failed to fetch");
+  }
+
+  return await response.json();
+}
+
+export function workspacesQueryOptions() {
+  return {
+    queryKey: ["workspaces"],
+    queryFn: fetchWorkspaces,
+  } as const;
+}
+
+export async function fetchService(serviceId: string, environmentId: string) {
+  const response = await apiClient.api.services[":serviceId"][
+    ":environmentId"
+  ].$get({
+    param: { serviceId, environmentId },
+  });
+  if (!response.ok) {
+    throw new Error("Failed to fetch");
+  }
+
+  return await response.json();
+}
+
+export function serviceQueryOptions(serviceId: string, environmentId: string) {
+  return {
+    queryKey: ["service", serviceId, environmentId],
+    queryFn() {
+      return fetchService(serviceId, environmentId);
+    },
   } as const;
 }

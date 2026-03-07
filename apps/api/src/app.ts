@@ -1,15 +1,20 @@
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { RequestLogger } from "evlog";
 import { createRequestLogger } from "evlog";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { Hono } from "hono";
 import type { Context, Next } from "hono";
+import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { auth } from "./auth";
 import type { UserRow } from "./db/schema";
 import { env } from "./env";
+import {
+  fetchHttpLogs,
+  fetchServiceInstance,
+  fetchWorkspaces,
+} from "./railway";
 
 const webDistPath = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -19,7 +24,7 @@ const sessionCookieName = "rv_session";
 
 type Variables = {
   log: RequestLogger;
-  user: UserRow | null;
+  user: (UserRow & { railwayAccessToken: string }) | null;
   sessionId: string | null;
 };
 
@@ -60,6 +65,14 @@ async function requestLoggingMiddleware(
   }
 }
 
+async function requireAuth(c: Context<{ Variables: Variables }>, next: Next) {
+  const user = c.get("user");
+  if (!user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  await next();
+}
+
 export const app = new Hono<{ Variables: Variables }>()
   .use("/_health", requestLoggingMiddleware)
   .use("/api/*", requestLoggingMiddleware)
@@ -84,7 +97,14 @@ export const app = new Hono<{ Variables: Variables }>()
   .use("/api/*", async (c, next) => {
     const sessionId = getCookie(c, sessionCookieName) ?? null;
     const authSession = await auth.resolveSession(sessionId);
-    c.set("user", authSession.user);
+    const accessToken =
+      authSession.user && (await auth.getAccessToken(authSession.user.id));
+    c.set(
+      "user",
+      authSession.user && accessToken
+        ? { ...authSession.user, railwayAccessToken: accessToken }
+        : null,
+    );
     c.set("sessionId", authSession.sessionId);
     await next();
   })
@@ -128,12 +148,8 @@ export const app = new Hono<{ Variables: Variables }>()
 
     return c.json({ ok: true });
   })
-  .get("/api/me", (c) => {
-    const user = c.get("user");
-
-    if (!user) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
+  .get("/api/me", requireAuth, (c) => {
+    const user = c.get("user")!;
 
     return c.json({
       id: user.id,
@@ -143,6 +159,31 @@ export const app = new Hono<{ Variables: Variables }>()
       name: user.name,
       picture: user.picture,
     });
+  })
+  .get("/api/me/workspaces", requireAuth, async (c) => {
+    const user = c.get("user")!;
+    const workspaces = await fetchWorkspaces(user.railwayAccessToken);
+    return c.json({ workspaces });
+  })
+  .get("/api/services/:serviceId/:environmentId", requireAuth, async (c) => {
+    const user = c.get("user")!;
+    const { serviceId, environmentId } = c.req.param();
+
+    const serviceInstance = await fetchServiceInstance(
+      user.railwayAccessToken,
+      serviceId,
+      environmentId,
+    );
+
+    let httpLogs: Awaited<ReturnType<typeof fetchHttpLogs>> = [];
+    if (serviceInstance.latestDeployment) {
+      httpLogs = await fetchHttpLogs(
+        user.railwayAccessToken,
+        serviceInstance.latestDeployment.id,
+      );
+    }
+
+    return c.json({ serviceInstance, httpLogs });
   })
   .use("*", async (c, next) => {
     if (c.req.path.startsWith("/api/")) {

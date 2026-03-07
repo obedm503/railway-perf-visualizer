@@ -1,6 +1,7 @@
-import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import path from "node:path";
+import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
 export default defineConfig({
@@ -19,5 +20,10 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+  },
+  resolve: {
+    alias: {
+      "~": path.resolve(__dirname, "./src"),
+    },
   },
 });

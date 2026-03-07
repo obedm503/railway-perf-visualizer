@@ -1,78 +1,74 @@
-import { useQuery, useQueryClient } from "@tanstack/solid-query";
-import { Link, createFileRoute } from "@tanstack/solid-router";
-import { authLoginUrl, logout, meQueryOptions } from "../lib/api";
+import { useQuery } from "@tanstack/solid-query";
+import { Link, createFileRoute, redirect } from "@tanstack/solid-router";
+import {
+  authLoginUrl,
+  meQueryOptions,
+  workspacesQueryOptions,
+} from "../lib/api";
+import { Layout } from "~/components/layout";
+import { RailwayIcon } from "~/components/logo";
+import { Show } from "solid-js";
+import { Header } from "~/components/header";
 
 export const Route = createFileRoute("/")({
+  async beforeLoad({ context }) {
+    const me = await context.queryClient.ensureQueryData(meQueryOptions());
+    if (!me) {
+      return;
+    }
+
+    const workspaceResult = await context.queryClient.ensureQueryData(
+      workspacesQueryOptions(),
+    );
+    const firstWorkspaceId = workspaceResult?.workspaces.at(0)?.id;
+    if (!firstWorkspaceId) {
+      return;
+    }
+
+    throw redirect({
+      to: "/$workspaceId",
+      params: { workspaceId: firstWorkspaceId },
+    });
+  },
   component: Home,
 });
 
 function Home() {
   const meQuery = useQuery(() => meQueryOptions());
-  const queryClient = useQueryClient();
 
-  function onLogin() {
-    const callbackURL = `${window.location.origin}/`;
-    window.location.href = authLoginUrl(callbackURL);
-  }
-
-  async function onLogout() {
-    await logout();
-    await queryClient.invalidateQueries({ queryKey: ["me"] });
-  }
+  const loginUrl = authLoginUrl(`${window.location.origin}/`);
 
   return (
-    <section class="w-full rounded-2xl border border-emerald-900/10 bg-white/80 p-8 shadow-[0_12px_40px_-24px_rgba(16,24,40,0.5)] backdrop-blur-sm sm:p-10">
-      <p class="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
-        Railway Perf Visualizer
-      </p>
-      <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-        Sign in to continue
-      </h1>
+    <Layout>
+      <Header />
+      <Show when={!meQuery.data}>
+        <div class="p-4 md:p-6">
+          <section class="border-border bg-secondary-background mx-auto w-full max-w-xl rounded-2xl border p-8 sm:p-10">
+            <h1 class="text-foreground mt-3 text-3xl font-semibold tracking-tight">
+              Railway Performance Visualizer
+            </h1>
 
-      {meQuery.isLoading ? (
-        <p class="mt-6 text-sm text-slate-600">Checking session...</p>
-      ) : meQuery.data ? (
-        <div class="mt-6 space-y-4">
-          <div class="rounded-xl border border-emerald-300/50 bg-emerald-50 px-4 py-3">
-            <p class="text-sm font-medium text-emerald-900">
-              {meQuery.data.name ?? "Unnamed user"}
-            </p>
-            <p class="text-sm text-emerald-900/80">
-              {meQuery.data.email ?? "No email"}
-            </p>
-            <p class="text-xs text-emerald-900/70">sub: {meQuery.data.sub}</p>
-          </div>
-          <div class="flex gap-3">
-            <Link
-              to="/dash"
-              class="inline-flex items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-800"
-            >
-              Go to /dash
-            </Link>
-            <button
-              type="button"
-              onClick={onLogout}
-              class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              Logout
-            </button>
-          </div>
+            {meQuery.isLoading ? (
+              <p class="text-muted-foreground mt-6 text-sm">
+                Checking session...
+              </p>
+            ) : (
+              <div class="mt-6 space-y-4">
+                <Link
+                  to={loginUrl}
+                  class="border-active-border bg-primary text-primary-foreground focus-visible:ring-ring focus-visible:ring-offset-background inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+                  aria-label="Sign in with Railway"
+                >
+                  <span class="inline-flex h-6 w-6 items-center justify-center rounded-full">
+                    <RailwayIcon />
+                  </span>
+                  Sign in with Railway
+                </Link>
+              </div>
+            )}
+          </section>
         </div>
-      ) : (
-        <div class="mt-6 space-y-4">
-          {/* <p class="text-sm text-slate-600">
-            Sign in with Railway to view your account and access protected
-            routes.
-          </p> */}
-          <button
-            type="button"
-            onClick={onLogin}
-            class="inline-flex items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-800"
-          >
-            Sign in with Railway
-          </button>
-        </div>
-      )}
-    </section>
+      </Show>
+    </Layout>
   );
 }

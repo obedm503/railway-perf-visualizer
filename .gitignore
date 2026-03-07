@@ -15,3 +15,5 @@ apps/api/data/
 .env.local
 .env.*.local
 .env
+
+graphql-env.d.ts
