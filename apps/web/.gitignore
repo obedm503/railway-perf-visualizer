@@ -23,3 +23,5 @@ src/routeTree.gen.ts
 *.njsproj
 *.sln
 *.sw?
+
+.tanstack
