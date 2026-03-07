@@ -97,12 +97,15 @@ export const app = new Hono<{ Variables: Variables }>()
   .get("/api/auth/callback/railway", async (c) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
+    // workaround until railway fixes the issue
+    // https://station.railway.com/feedback/login-with-railway-oidc-configuration-i-b134e4c4
+    const iss = c.req.query("iss") ?? "https://backboard.railway.com";
 
-    if (!code || !state) {
+    if (!code || !state || !iss) {
       return c.json({ error: "Missing OAuth callback parameters" }, 400);
     }
 
-    const result = await auth.handleCallback(code, state);
+    const result = await auth.handleCallback({ code, state, iss });
 
     setCookie(c, sessionCookieName, result.sessionId, {
       path: "/",

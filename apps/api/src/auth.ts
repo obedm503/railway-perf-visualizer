@@ -11,10 +11,7 @@ import {
 } from "./db/schema";
 import { env } from "./env";
 
-const nanoid = customAlphabet(
-  "0123456789abcdefghijklmnopqrstuvwxyz",
-  21,
-);
+const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
 const PROVIDER = "railway";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
@@ -22,28 +19,40 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 let cachedClient: Client | null = null;
 
-const getRedirectUri = (): string =>
-  `${env.API_ORIGIN}/api/auth/callback/railway`;
+function getRedirectUri(): string {
+  return `${env.API_ORIGIN}/api/auth/callback/railway`;
+}
 
-const getOidcClient = async (): Promise<Client> => {
+async function getOidcClient(): Promise<Client> {
   if (!env.RAILWAY_CLIENT_ID || !env.RAILWAY_CLIENT_SECRET) {
     throw new Error("Missing RAILWAY_CLIENT_ID or RAILWAY_CLIENT_SECRET");
   }
 
   if (!cachedClient) {
     const issuer = await Issuer.discover(env.RAILWAY_OIDC_DISCOVERY_URL);
+    // const meta = await fetch(env.RAILWAY_OIDC_DISCOVERY_URL).then((r) =>
+    //   r.json(),
+    // );
+    // const issuer = new Issuer({
+    //   ...meta,
+    //   authorization_response_iss_parameter_supported: false,
+    // });
     cachedClient = new issuer.Client({
       client_id: env.RAILWAY_CLIENT_ID!,
       client_secret: env.RAILWAY_CLIENT_SECRET!,
       redirect_uris: [getRedirectUri()],
       response_types: ["code"],
+      // set to ES256 explicitly because RS256 is the default even if discovery says it's not supported
+      // https://github.com/panva/openid-client/issues/509
+      // https://github.com/panva/openid-client/issues/115#issuecomment-418788175
+      id_token_signed_response_alg: "ES256",
     });
   }
 
   return cachedClient;
-};
+}
 
-const normalizeCallbackUrl = (input: string | null): string => {
+function normalizeCallbackUrl(input: string | null): string {
   if (!input) {
     return `${env.WEB_ORIGIN}/`;
   }
@@ -58,26 +67,27 @@ const normalizeCallbackUrl = (input: string | null): string => {
   } catch {
     return `${env.WEB_ORIGIN}/`;
   }
-};
+}
 
-const getTokenExpiry = (tokenSet: TokenSet): Date | null => {
+function getTokenExpiry(tokenSet: TokenSet): Date | null {
   if (!tokenSet.expires_at) {
     return null;
   }
   return new Date(tokenSet.expires_at * 1000);
-};
+}
 
-const boolFromUnknown = (value: unknown): boolean =>
-  value === true || value === "true" || value === 1;
+function boolFromUnknown(value: unknown): boolean {
+  return value === true || value === "true" || value === 1;
+}
 
-const toNullableString = (value: unknown): string | null => {
+function toNullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-};
+}
 
-const resolveProfile = async (
+async function resolveProfile(
   client: Client,
   tokenSet: TokenSet,
-): Promise<Record<string, unknown>> => {
+): Promise<Record<string, unknown>> {
   const idTokenClaims = tokenSet.claims() as Record<string, unknown>;
 
   try {
@@ -89,12 +99,12 @@ const resolveProfile = async (
   } catch {
     return idTokenClaims;
   }
-};
+}
 
-const upsertIdentityAndUser = async (
+async function upsertIdentityAndUser(
   profile: Record<string, unknown>,
   tokenSet: TokenSet,
-): Promise<UserRow> => {
+): Promise<UserRow> {
   const providerSubject = toNullableString(profile.sub);
   if (!providerSubject) {
     throw new Error("OIDC profile missing required subject");
@@ -168,7 +178,7 @@ const upsertIdentityAndUser = async (
   }
 
   return user;
-};
+}
 
 export const auth = {
   scopes: [
@@ -198,20 +208,27 @@ export const auth = {
       expiresAt: new Date(now.getTime() + OAUTH_STATE_TTL_MS),
     });
 
+    // see https://docs.railway.com/integrations/oauth/login-and-tokens#initiating-login
     return client.authorizationUrl({
-      scope: this.scopes,
-      redirect_uri: getRedirectUri(),
       response_type: "code",
+      client_id: env.RAILWAY_CLIENT_ID,
+      redirect_uri: getRedirectUri(),
+      scope: this.scopes,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
     });
   },
 
-  async handleCallback(
-    code: string,
-    state: string,
-  ): Promise<{
+  async handleCallback({
+    code,
+    iss,
+    state,
+  }: {
+    code: string;
+    state: string;
+    iss: string;
+  }): Promise<{
     callbackUrl: string;
     sessionId: string;
   }> {
@@ -229,7 +246,7 @@ export const auth = {
     const client = await getOidcClient();
     const tokenSet = await client.callback(
       getRedirectUri(),
-      { code, state },
+      { code, state, iss },
       {
         state,
         code_verifier: storedState.codeVerifier,
