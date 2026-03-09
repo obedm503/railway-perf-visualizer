@@ -1,6 +1,6 @@
 import { and, eq, gt, lt } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
-import { generators, Issuer, type Client, type TokenSet } from "openid-client";
+import * as oidc from "openid-client";
 import { db } from "./db/client";
 import {
   identities,
@@ -18,39 +18,36 @@ const PROVIDER = "railway";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
-let cachedClient: Client | null = null;
+type TokenSet = oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers;
+
+let cachedConfiguration: oidc.Configuration | null = null;
 
 function getRedirectUri(): string {
   return `${env.API_ORIGIN}/api/auth/callback/railway`;
 }
 
-async function getOidcClient(): Promise<Client> {
+async function getOidcConfiguration(): Promise<oidc.Configuration> {
   if (!env.RAILWAY_CLIENT_ID || !env.RAILWAY_CLIENT_SECRET) {
     throw new Error("Missing RAILWAY_CLIENT_ID or RAILWAY_CLIENT_SECRET");
   }
 
-  if (!cachedClient) {
-    const issuer = await Issuer.discover(env.RAILWAY_OIDC_DISCOVERY_URL);
-    // const meta = await fetch(env.RAILWAY_OIDC_DISCOVERY_URL).then((r) =>
-    //   r.json(),
-    // );
-    // const issuer = new Issuer({
-    //   ...meta,
-    //   authorization_response_iss_parameter_supported: false,
-    // });
-    cachedClient = new issuer.Client({
-      client_id: env.RAILWAY_CLIENT_ID!,
-      client_secret: env.RAILWAY_CLIENT_SECRET!,
-      redirect_uris: [getRedirectUri()],
-      response_types: ["code"],
-      // set to ES256 explicitly because RS256 is the default even if discovery says it's not supported
-      // https://github.com/panva/openid-client/issues/509
-      // https://github.com/panva/openid-client/issues/115#issuecomment-418788175
-      id_token_signed_response_alg: "ES256",
-    });
+  if (!cachedConfiguration) {
+    cachedConfiguration = await oidc.discovery(
+      new URL(env.RAILWAY_OIDC_DISCOVERY_URL),
+      env.RAILWAY_CLIENT_ID,
+      {
+        client_secret: env.RAILWAY_CLIENT_SECRET,
+        redirect_uris: [getRedirectUri()],
+        response_types: ["code"],
+        // set to ES256 explicitly because RS256 is the default even if discovery says it's not supported
+        // https://github.com/panva/openid-client/issues/509
+        // https://github.com/panva/openid-client/issues/115#issuecomment-418788175
+        id_token_signed_response_alg: "ES256",
+      },
+    );
   }
 
-  return cachedClient;
+  return cachedConfiguration;
 }
 
 function normalizeCallbackUrl(input: string | null): string {
@@ -71,10 +68,15 @@ function normalizeCallbackUrl(input: string | null): string {
 }
 
 function getTokenExpiry(tokenSet: TokenSet): Date | null {
-  if (!tokenSet.expires_at) {
+  const expiresInSeconds =
+    typeof tokenSet.expiresIn === "function"
+      ? tokenSet.expiresIn()
+      : tokenSet.expires_in;
+  if (typeof expiresInSeconds !== "number") {
     return null;
   }
-  return new Date(tokenSet.expires_at * 1000);
+
+  return new Date(Date.now() + expiresInSeconds * 1000);
 }
 
 function boolFromUnknown(value: unknown): boolean {
@@ -86,16 +88,21 @@ function toNullableString(value: unknown): string | null {
 }
 
 async function resolveProfile(
-  client: Client,
+  config: oidc.Configuration,
   tokenSet: TokenSet,
 ): Promise<Record<string, unknown>> {
-  const idTokenClaims = tokenSet.claims() as Record<string, unknown>;
+  const idTokenClaims = (tokenSet.claims() ?? {}) as Record<string, unknown>;
+  const providerSubject = toNullableString(idTokenClaims.sub);
+  if (!providerSubject || !tokenSet.access_token) {
+    return idTokenClaims;
+  }
 
   try {
-    const userInfo = (await client.userinfo(tokenSet)) as Record<
-      string,
-      unknown
-    >;
+    const userInfo = await oidc.fetchUserInfo(
+      config,
+      tokenSet.access_token,
+      providerSubject,
+    );
     return { ...idTokenClaims, ...userInfo };
   } catch {
     return idTokenClaims;
@@ -195,10 +202,10 @@ export const auth = {
   sessionMaxAgeSeconds: SESSION_TTL_SECONDS,
 
   async createLoginUrl(callbackURL: string | null): Promise<string> {
-    const client = await getOidcClient();
-    const state = generators.state();
-    const codeVerifier = generators.codeVerifier();
-    const codeChallenge = generators.codeChallenge(codeVerifier);
+    const configuration = await getOidcConfiguration();
+    const state = oidc.randomState();
+    const codeVerifier = oidc.randomPKCECodeVerifier();
+    const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
     const now = new Date();
 
     await db.delete(oauthStates).where(lt(oauthStates.expiresAt, now));
@@ -212,16 +219,16 @@ export const auth = {
     });
 
     // see https://docs.railway.com/integrations/oauth/login-and-tokens#initiating-login
-    return client.authorizationUrl({
-      response_type: "code",
-      client_id: env.RAILWAY_CLIENT_ID,
-      redirect_uri: getRedirectUri(),
-      scope: this.scopes,
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: "S256",
-      prompt: "consent", // set to include a refresh token
-    });
+    return oidc
+      .buildAuthorizationUrl(configuration, {
+        redirect_uri: getRedirectUri(),
+        scope: this.scopes,
+        state,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+        prompt: "consent", // set to include a refresh token
+      })
+      .toString();
   },
 
   async handleCallback({
@@ -247,18 +254,23 @@ export const auth = {
       throw new Error("Invalid or expired OAuth state");
     }
 
-    const client = await getOidcClient();
-    const tokenSet = await client.callback(
-      getRedirectUri(),
-      { code, state, iss },
+    const configuration = await getOidcConfiguration();
+    const callbackUrl = new URL(getRedirectUri());
+    callbackUrl.searchParams.set("code", code);
+    callbackUrl.searchParams.set("state", state);
+    callbackUrl.searchParams.set("iss", iss);
+
+    const tokenSet = await oidc.authorizationCodeGrant(
+      configuration,
+      callbackUrl,
       {
-        state,
-        code_verifier: storedState.codeVerifier,
+        expectedState: state,
+        pkceCodeVerifier: storedState.codeVerifier,
       },
     );
     log.info({ handleCallback: { tokenSet } });
 
-    const profile = await resolveProfile(client, tokenSet);
+    const profile = await resolveProfile(configuration, tokenSet);
     const user = await upsertIdentityAndUser(profile, tokenSet);
 
     const sessionId = nanoid();
@@ -315,7 +327,6 @@ export const auth = {
       ),
     });
 
-    console.log("getAccessToken", { identity });
     if (!identity?.accessToken) {
       return null;
     }
@@ -333,8 +344,11 @@ export const auth = {
     }
 
     try {
-      const client = await getOidcClient();
-      const tokenSet = await client.refresh(identity.refreshToken);
+      const configuration = await getOidcConfiguration();
+      const tokenSet = await oidc.refreshTokenGrant(
+        configuration,
+        identity.refreshToken,
+      );
       console.log("getAccessToken", { tokenSet });
 
       if (!tokenSet.access_token) {
