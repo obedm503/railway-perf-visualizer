@@ -1,5 +1,6 @@
+import { print } from "graphql";
+import type { TadaDocumentNode } from "gql.tada";
 import { log } from "evlog";
-import { GraphQLClient } from "graphql-request";
 import {
   graphql,
   readFragment,
@@ -10,14 +11,55 @@ import {
 
 const RAILWAY_GRAPHQL_ENDPOINT = "https://backboard.railway.com/graphql/v2";
 
+async function graphqlRequest<
+  Result,
+  Variables extends Record<string, unknown>,
+>(
+  accessToken: string,
+  query: TadaDocumentNode<Result, Variables>,
+  ...[variables]: keyof Variables extends never ? [] : [variables: Variables]
+): Promise<Result> {
+  const response = await fetch(RAILWAY_GRAPHQL_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      query: print(query),
+      variables: variables ?? undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `GraphQL request failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const json = (await response.json()) as {
+    data?: Result;
+    errors?: Array<{ message: string }>;
+  };
+
+  if (json.errors?.length) {
+    throw new Error(
+      `GraphQL errors: ${json.errors.map((e) => e.message).join(", ")}`,
+    );
+  }
+
+  if (!json.data) {
+    throw new Error("GraphQL response missing data");
+  }
+
+  return json.data;
+}
+
 const SERVICE_INSTANCE_FRAGMENT = graphql(`
   fragment ServiceInstance on ServiceInstance {
     id
     serviceId
     serviceName
-    latestDeployment {
-      id
-    }
   }
 `);
 
@@ -102,7 +144,6 @@ function transformServiceInstance(raw: ServiceInstanceMask) {
     id: serviceInstance.id,
     serviceId: serviceInstance.serviceId,
     serviceName: serviceInstance.serviceName,
-    latestDeployment: serviceInstance.latestDeployment,
   };
 }
 
@@ -153,7 +194,7 @@ const SERVICE_INSTANCE_QUERY = graphql(`
       numReplicas
       restartPolicyType
       restartPolicyMaxRetries
-      latestDeployment {
+      activeDeployments {
         id
         status
         createdAt
@@ -171,13 +212,7 @@ export async function fetchServiceInstance(
   serviceId: string,
   environmentId: string,
 ): Promise<ServiceInstanceDetail> {
-  const client = new GraphQLClient(RAILWAY_GRAPHQL_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const data = await client.request(SERVICE_INSTANCE_QUERY, {
+  const data = await graphqlRequest(accessToken, SERVICE_INSTANCE_QUERY, {
     serviceId,
     environmentId,
   });
@@ -209,6 +244,7 @@ const HTTP_LOGS_QUERY = graphql(`
       beforeLimit: $beforeLimit
       afterLimit: $afterLimit
     ) {
+      deploymentId
       requestId
       timestamp
       method
@@ -225,7 +261,7 @@ const HTTP_LOGS_QUERY = graphql(`
 export type HttpLog = ResultOf<typeof HTTP_LOGS_QUERY>["httpLogs"][number];
 type HttpLogsVariables = VariablesOf<typeof HTTP_LOGS_QUERY>;
 
-function previousLogs({
+export function previousLogs({
   deploymentId,
   from,
   take,
@@ -258,35 +294,108 @@ export function nextLogs({
   };
 }
 
-export async function fetchHttpLogs(
+export async function fetchHttpLogsWithVariables(
   accessToken: string,
-  deploymentId: string,
+  variables: HttpLogsVariables,
 ): Promise<HttpLog[]> {
-  const client = new GraphQLClient(RAILWAY_GRAPHQL_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const variables = previousLogs({
-    deploymentId,
-    from: new Date(),
-    take: 5000,
-  });
   log.info({ fetchHttpLogs: { variables } });
-  const data = await client.request(HTTP_LOGS_QUERY, variables);
-  return [...data.httpLogs].reverse();
+  const data = await graphqlRequest(accessToken, HTTP_LOGS_QUERY, variables);
+  return data.httpLogs;
+}
+
+const DEPLOYMENT_FRAGMENT = graphql(`
+  fragment Deployment on Deployment {
+    id
+    createdAt
+    status
+  }
+`);
+
+const DEPLOYMENTS_QUERY = graphql(
+  `
+    query Deployments(
+      $first: Int!
+      $after: String
+      $input: DeploymentListInput!
+    ) {
+      deployments(first: $first, after: $after, input: $input) {
+        edges {
+          node {
+            ...Deployment
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `,
+  [DEPLOYMENT_FRAGMENT],
+);
+
+type DeploymentSummaryMask = FragmentOf<typeof DEPLOYMENT_FRAGMENT>;
+
+function transformDeploymentSummary(raw: DeploymentSummaryMask) {
+  const deployment = readFragment(DEPLOYMENT_FRAGMENT, raw);
+  return {
+    id: deployment.id,
+    createdAt: deployment.createdAt,
+    status: deployment.status,
+  };
+}
+
+export type DeploymentSummary = ReturnType<typeof transformDeploymentSummary>;
+
+/**
+ * Fetch all deployments for a service+environment created in the last 7 days.
+ * Paginates through results, stopping when deployments are older than the cutoff.
+ */
+export async function fetchDeployments(
+  accessToken: string,
+  serviceId: string,
+  environmentId: string,
+): Promise<DeploymentSummary[]> {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const deployments: DeploymentSummary[] = [];
+  let after: string | null = null;
+
+  while (true) {
+    const variables: VariablesOf<typeof DEPLOYMENTS_QUERY> = {
+      first: 100,
+      after,
+      input: { serviceId, environmentId },
+    };
+    const data = await graphqlRequest(
+      accessToken,
+      DEPLOYMENTS_QUERY,
+      variables,
+    );
+
+    const edges = data.deployments.edges;
+    if (edges.length === 0) break;
+
+    let pastCutoff = false;
+    for (const edge of edges) {
+      const deployment = transformDeploymentSummary(edge.node);
+      if (new Date(deployment.createdAt) < cutoff) {
+        pastCutoff = true;
+        break;
+      }
+      deployments.push(deployment);
+    }
+
+    if (pastCutoff || !data.deployments.pageInfo.hasNextPage) break;
+    after = data.deployments.pageInfo.endCursor ?? null;
+    if (!after) break;
+  }
+
+  return deployments;
 }
 
 export async function fetchWorkspaces(
   accessToken: string,
 ): Promise<Workspace[]> {
-  const client = new GraphQLClient(RAILWAY_GRAPHQL_ENDPOINT, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const data = await client.request(WORKSPACES_QUERY);
+  const data = await graphqlRequest(accessToken, WORKSPACES_QUERY);
   return data.me.workspaces.map(transformWorkspace);
 }

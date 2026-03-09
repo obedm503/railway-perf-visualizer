@@ -1,18 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/solid-query";
-import { Link } from "@tanstack/solid-router";
-import type { ParentProps } from "solid-js";
+import { Link, useNavigate } from "@tanstack/solid-router";
+import { ErrorBoundary, type ParentProps, Show, Suspense } from "solid-js";
 import { RailwayIcon } from "~/components/logo";
+import { Skeleton } from "~/components/ui/skeleton";
 import { logout, meQueryOptions } from "~/lib/api";
 
 export function Header(props: ParentProps) {
-  const meQuery = useQuery(() => meQueryOptions());
-  const queryClient = useQueryClient();
-
-  async function onLogout() {
-    queryClient.clear();
-    await logout();
-  }
-
   return (
     <header class="border-border bg-background sticky top-0 z-40 border-b">
       <div class="flex h-14 items-center justify-between px-4">
@@ -24,26 +17,52 @@ export function Header(props: ParentProps) {
             <RailwayIcon />
           </Link>
 
-          {props.children ? (
-            <>
-              <span class="text-border">|</span>
-              {props.children}
-            </>
-          ) : null}
+          <Show when={props.children}>
+            <span class="text-border">|</span>
+            {props.children}
+          </Show>
         </div>
 
         <div class="text-muted-foreground flex items-center gap-3 text-xs">
-          {meQuery.data ? (
-            <button
-              type="button"
-              onClick={onLogout}
-              class="border-border text-secondary-foreground hover:bg-accent hover:text-accent-foreground inline-flex cursor-pointer items-center rounded-lg border px-4 py-2 text-sm font-medium transition"
-            >
-              Logout
-            </button>
-          ) : null}
+          <ErrorBoundary fallback={() => <HeaderAuthError />}>
+            <Suspense fallback={<HeaderAuthSkeleton />}>
+              <HeaderAuthActions />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </div>
     </header>
   );
+}
+
+function HeaderAuthActions() {
+  const meQuery = useQuery(() => meQueryOptions());
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  async function onLogout() {
+    await logout();
+    queryClient.clear();
+    navigate({ to: "/" });
+  }
+
+  return (
+    <Show when={meQuery.data}>
+      <button
+        type="button"
+        onClick={onLogout}
+        class="border-border text-secondary-foreground hover:bg-accent hover:text-accent-foreground inline-flex cursor-pointer items-center rounded-lg border px-4 py-2 text-sm font-medium transition"
+      >
+        Logout
+      </button>
+    </Show>
+  );
+}
+
+function HeaderAuthSkeleton() {
+  return <Skeleton height={36} width={96} class="rounded-lg" />;
+}
+
+function HeaderAuthError() {
+  return <span class="text-muted-foreground text-xs">Account unavailable</span>;
 }

@@ -7,14 +7,16 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createClient } from "rivetkit/client";
+import { registry } from "./actors";
 import { auth } from "./auth";
 import type { UserRow } from "./db/schema";
 import { env } from "./env";
-import {
-  fetchHttpLogs,
-  fetchServiceInstance,
-  fetchWorkspaces,
-} from "./railway";
+import { fetchServiceInstance, fetchWorkspaces } from "./railway";
+
+const client = createClient<typeof registry>({
+  endpoint: env.API_ORIGIN + "/api/rivet",
+});
 
 const webDistPath = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -75,6 +77,7 @@ async function requireAuth(c: Context<{ Variables: Variables }>, next: Next) {
 
 export const app = new Hono<{ Variables: Variables }>()
   .use("/_health", requestLoggingMiddleware)
+  .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
   .use("/api/*", requestLoggingMiddleware)
   .get("/_health", (c) => {
     c.get("log").set({ route: "health" });
@@ -99,6 +102,7 @@ export const app = new Hono<{ Variables: Variables }>()
     const authSession = await auth.resolveSession(sessionId);
     const accessToken =
       authSession.user && (await auth.getAccessToken(authSession.user.id));
+    c.get("log").set({ accessToken });
     c.set(
       "user",
       authSession.user && accessToken
@@ -117,9 +121,7 @@ export const app = new Hono<{ Variables: Variables }>()
   .get("/api/auth/callback/railway", async (c) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
-    // workaround until railway fixes the issue
-    // https://station.railway.com/feedback/login-with-railway-oidc-configuration-i-b134e4c4
-    const iss = c.req.query("iss") ?? "https://backboard.railway.com";
+    const iss = c.req.query("iss");
 
     if (!code || !state || !iss) {
       return c.json({ error: "Missing OAuth callback parameters" }, 400);
@@ -165,25 +167,58 @@ export const app = new Hono<{ Variables: Variables }>()
     const workspaces = await fetchWorkspaces(user.railwayAccessToken);
     return c.json({ workspaces });
   })
-  .get("/api/services/:serviceId/:environmentId", requireAuth, async (c) => {
+  .get(
+    "/api/service/:serviceId/:environmentId/logs",
+    requireAuth,
+    async (c) => {
+      const user = c.get("user")!;
+      const { serviceId, environmentId } = c.req.param();
+      const before = c.req.query("before") ?? undefined;
+      const limitParam = c.req.query("limit");
+      const limit = limitParam ? Number(limitParam) : undefined;
+
+      c.get("log").set({ logs: { serviceId, environmentId } });
+      const actor = client.httpLogCollector.getOrCreate(
+        [serviceId, environmentId],
+        {
+          createWithInput: {
+            serviceId,
+            environmentId,
+            userId: user.id,
+          },
+        },
+      );
+
+      // Ensure the actor uses the latest user's token
+      await actor.updateUser(user.id);
+
+      const result = await actor.getLogsPage({ before, limit });
+      return c.json(result);
+    },
+  )
+  .get("/api/service/:serviceId/:environmentId", requireAuth, async (c) => {
     const user = c.get("user")!;
     const { serviceId, environmentId } = c.req.param();
-
     const serviceInstance = await fetchServiceInstance(
       user.railwayAccessToken,
       serviceId,
       environmentId,
     );
 
-    let httpLogs: Awaited<ReturnType<typeof fetchHttpLogs>> = [];
-    if (serviceInstance.latestDeployment) {
-      httpLogs = await fetchHttpLogs(
-        user.railwayAccessToken,
-        serviceInstance.latestDeployment.id,
-      );
-    }
+    const actor = client.httpLogCollector.getOrCreate(
+      [serviceId, environmentId],
+      {
+        createWithInput: {
+          serviceId,
+          environmentId,
+          userId: user.id,
+        },
+      },
+    );
 
-    return c.json({ serviceInstance, httpLogs });
+    await actor.updateUser(user.id);
+
+    return c.json({ serviceInstance });
   })
   .use("*", async (c, next) => {
     if (c.req.path.startsWith("/api/")) {

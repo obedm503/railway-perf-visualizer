@@ -21,7 +21,7 @@ export function authLoginUrl(callbackURL: string): string {
 export async function fetchMe() {
   const response = await apiClient.api.me.$get();
   if (!response.ok) {
-    throw new Error("Failed to fetch");
+    return null;
   }
 
   return await response.json();
@@ -41,7 +41,7 @@ export function meQueryOptions() {
 export async function fetchWorkspaces() {
   const response = await apiClient.api.me.workspaces.$get();
   if (!response.ok) {
-    throw new Error("Failed to fetch");
+    return null;
   }
 
   return await response.json();
@@ -55,13 +55,13 @@ export function workspacesQueryOptions() {
 }
 
 export async function fetchService(serviceId: string, environmentId: string) {
-  const response = await apiClient.api.services[":serviceId"][
+  const response = await apiClient.api.service[":serviceId"][
     ":environmentId"
   ].$get({
     param: { serviceId, environmentId },
   });
   if (!response.ok) {
-    throw new Error("Failed to fetch");
+    return null;
   }
 
   return await response.json();
@@ -73,5 +73,34 @@ export function serviceQueryOptions(serviceId: string, environmentId: string) {
     queryFn() {
       return fetchService(serviceId, environmentId);
     },
+  } as const;
+}
+
+export async function fetchServiceLogs(
+  serviceId: string,
+  environmentId: string,
+) {
+  const response = await apiClient.api.service[":serviceId"][
+    ":environmentId"
+  ].logs.$get({
+    param: { serviceId, environmentId },
+  });
+  if (!response.ok) {
+    return null;
+  }
+
+  return await response.json();
+}
+
+export function serviceLogsQueryOptions(
+  serviceId: string,
+  environmentId: string,
+) {
+  return {
+    queryKey: ["service-logs", serviceId, environmentId],
+    queryFn() {
+      return fetchServiceLogs(serviceId, environmentId);
+    },
+    refetchInterval: 60_000,
   } as const;
 }
