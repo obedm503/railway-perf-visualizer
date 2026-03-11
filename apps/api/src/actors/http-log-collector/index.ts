@@ -1,5 +1,5 @@
 import { and, desc, gte, lt, lte, sql } from "drizzle-orm";
-import { actor } from "rivetkit";
+import { actor, ActorDefinition } from "rivetkit";
 import { db } from "rivetkit/db/drizzle";
 import { workflow } from "rivetkit/workflow";
 import { auth } from "../../auth";
@@ -23,16 +23,15 @@ type HttpLogCollectorInput = {
   userId: string;
 };
 
-export const httpLogCollector = actor({
-  createState(
-    c,
-    input: HttpLogCollectorInput,
-  ): {
-    serviceId: string;
-    environmentId: string;
-    userId: string;
-    lastFetchedAt: number | null;
-  } {
+type HttpLogCollectorState = {
+  serviceId: string;
+  environmentId: string;
+  userId: string;
+  lastFetchedAt: number | null;
+};
+
+const collector = actor({
+  createState(_ctx, input: HttpLogCollectorInput): HttpLogCollectorState {
     return {
       serviceId: input.serviceId,
       environmentId: input.environmentId,
@@ -443,3 +442,85 @@ export const httpLogCollector = actor({
     },
   },
 });
+
+type Actions = {
+  updateUser(c: any, userId: string): void;
+  getLogsPage(
+    c: any,
+    params: { before?: string; limit?: number },
+  ): Promise<{
+    histograms: Array<{
+      id: number;
+      deploymentId: string;
+      windowStart: string;
+      windowEnd: string;
+      totalCount: number;
+      buckets: HistogramBucket[];
+      p50: number;
+      p90: number;
+      p99: number;
+      p999: number;
+    }>;
+    httpLogs: Array<{
+      deploymentId: string;
+      requestId: string;
+      timestamp: string;
+      method: string;
+      path: string;
+      host: string;
+      httpStatus: number;
+      totalDuration: number;
+      upstreamRqDuration: number;
+      edgeRegion: string;
+    }>;
+    nextCursor: string | null;
+  }>;
+  getHistograms(
+    c: any,
+    params: { before?: string; limit?: number },
+  ): Promise<{
+    histograms: Array<{
+      id: number;
+      deploymentId: string;
+      windowStart: string;
+      windowEnd: string;
+      totalCount: number;
+      buckets: HistogramBucket[];
+      p50: number;
+      p90: number;
+      p99: number;
+      p999: number;
+    }>;
+    nextCursor: string | null;
+  }>;
+  getHttpLogs(
+    c: any,
+    params: { before?: string; limit?: number },
+  ): Promise<{
+    httpLogs: Array<{
+      deploymentId: string;
+      requestId: string;
+      timestamp: string;
+      method: string;
+      path: string;
+      host: string;
+      httpStatus: number;
+      totalDuration: number;
+      upstreamRqDuration: number;
+      edgeRegion: string;
+    }>;
+    nextCursor: string | null;
+  }>;
+};
+
+export const httpLogCollector = collector as ActorDefinition<
+  HttpLogCollectorState,
+  unknown,
+  unknown,
+  unknown,
+  unknown,
+  any,
+  any,
+  any,
+  Actions
+>;

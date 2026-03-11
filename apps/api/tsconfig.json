@@ -1,11 +1,17 @@
 {
   "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
     "plugins": [
       {
         "name": "gql.tada/ts-plugin",
@@ -14,5 +20,5 @@
       }
     ]
   },
-  "include": ["src"]
+  "include": ["src", "src/**/*.json"]
 }

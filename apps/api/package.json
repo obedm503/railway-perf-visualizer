@@ -10,9 +10,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run src/db/migrate.ts"
   },
-  "exports": {
-    "./app": "./src/app.ts"
-  },
   "dependencies": {
     "drizzle-orm": "^0.45.1",
     "evlog": "^2.4.1",

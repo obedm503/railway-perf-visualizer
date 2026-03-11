@@ -12,7 +12,7 @@
     "dev:web": "bun run --cwd apps/web dev",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:demo": "bun run --cwd apps/demo dev",
-    "build": "bun run --cwd apps/web build && bun run --cwd apps/api build && bun run --cwd apps/demo build",
+    "build": "bun run --cwd apps/api build && bun run --cwd apps/web build && bun run --cwd apps/demo build",
     "start": "bun run --cwd apps/api start",
     "format": "prettier --write ."
   },
