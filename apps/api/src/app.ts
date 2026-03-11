@@ -60,7 +60,6 @@ async function requireAuth(c: Context<{ Variables: Variables }>, next: Next) {
 }
 
 export const app = new Hono<{ Variables: Variables }>()
-  .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
   .get("/_health", (c) => c.text("ok"))
   .use(
     "/api/*",
@@ -77,6 +76,7 @@ export const app = new Hono<{ Variables: Variables }>()
     }),
   )
   .use(requestLoggingMiddleware)
+  .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
   .use("/api/*", async (c, next) => {
     const sessionId = getCookie(c, sessionCookieName) ?? null;
     const authSession = await auth.resolveSession(sessionId);
