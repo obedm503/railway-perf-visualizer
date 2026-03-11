@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { cors } from "hono/cors";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "rivetkit/client";
@@ -76,27 +75,12 @@ async function requireAuth(c: Context<{ Variables: Variables }>, next: Next) {
 }
 
 export const app = new Hono<{ Variables: Variables }>()
-  .use("/_health", requestLoggingMiddleware)
   .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
-  .use("/api/*", requestLoggingMiddleware)
+  .all(requestLoggingMiddleware)
   .get("/_health", (c) => {
     c.get("log").set({ route: "health" });
     return c.text("ok");
   })
-  .use(
-    "/api/*",
-    cors({
-      origin(origin) {
-        if (!origin) {
-          return env.WEB_ORIGIN;
-        }
-        return origin === env.WEB_ORIGIN ? origin : "";
-      },
-      credentials: true,
-      allowMethods: ["GET", "POST", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Authorization"],
-    }),
-  )
   .use("/api/*", async (c, next) => {
     const sessionId = getCookie(c, sessionCookieName) ?? null;
     const authSession = await auth.resolveSession(sessionId);

@@ -2,6 +2,7 @@ import { log } from "evlog";
 import pino from "pino";
 import { setup } from "rivetkit";
 import { httpLogCollector } from "./http-log-collector";
+import { env } from "../env";
 
 // pino level numbers to names
 const PINO_LEVELS: Record<number, string> = {
@@ -55,5 +56,5 @@ const baseLogger = pino({ level: "debug" }, evlogDestination);
 export const registry = setup({
   use: { httpLogCollector },
   logging: { baseLogger },
-  // endpoint: env.API_ORIGIN + "/api/rivet",
+  storagePath: env.RIVET_PATH,
 });
