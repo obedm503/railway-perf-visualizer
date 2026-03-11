@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
+    "prebuild": "gql-tada generate output",
     "build": "tsc --noEmit",
     "start": "bun run src/index.ts",
     "db:generate": "drizzle-kit generate"
