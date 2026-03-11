@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
 export default defineConfig({
-  plugins: [tanstackRouter({ target: "solid" }), solid(), tailwindcss()],
+  plugins: [tanstackRouter(), solid(), tailwindcss()],
   base: "/",
   server: {
     host: true,

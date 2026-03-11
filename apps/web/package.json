@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host --port 3000 --strictPort",
+    "prebuild": "tsr generate",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",
+    "@tanstack/router-cli": "^1.166.7",
     "@tanstack/router-plugin": "^1.166.3",
     "@types/node": "^25.3.5",
     "tailwindcss": "^4.2.1",
