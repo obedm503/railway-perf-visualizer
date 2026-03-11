@@ -7,16 +7,11 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClient } from "rivetkit/client";
-import { registry } from "./actors";
+import { registry, rivetClient } from "./actors";
 import { auth } from "./auth";
 import type { UserRow } from "./db/schema";
 import { env } from "./env";
 import { fetchServiceInstance, fetchWorkspaces } from "./railway";
-
-const client = createClient<typeof registry>({
-  endpoint: env.API_ORIGIN + "/api/rivet",
-});
 
 const webDistPath = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -29,17 +24,6 @@ type Variables = {
   user: (UserRow & { railwayAccessToken: string }) | null;
   sessionId: string | null;
 };
-
-const serveWebStatic = serveStatic({
-  root: webDistPath,
-  rewriteRequestPath(path) {
-    return path === "/" ? "/index.html" : path;
-  },
-});
-const serveWebFallback = serveStatic({
-  root: webDistPath,
-  path: "/index.html",
-});
 
 async function requestLoggingMiddleware(
   c: Context<{ Variables: Variables }>,
@@ -77,7 +61,6 @@ async function requireAuth(c: Context<{ Variables: Variables }>, next: Next) {
 
 export const app = new Hono<{ Variables: Variables }>()
   .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
-  .all(requestLoggingMiddleware)
   .get("/_health", (c) => c.text("ok"))
   .use(
     "/api/*",
@@ -93,6 +76,7 @@ export const app = new Hono<{ Variables: Variables }>()
       allowHeaders: ["Content-Type", "Authorization"],
     }),
   )
+  .use(requestLoggingMiddleware)
   .use("/api/*", async (c, next) => {
     const sessionId = getCookie(c, sessionCookieName) ?? null;
     const authSession = await auth.resolveSession(sessionId);
@@ -174,7 +158,7 @@ export const app = new Hono<{ Variables: Variables }>()
       const limit = limitParam ? Number(limitParam) : undefined;
 
       c.get("log").set({ logs: { serviceId, environmentId } });
-      const actor = client.httpLogCollector.getOrCreate(
+      const actor = rivetClient().httpLogCollector.getOrCreate(
         [serviceId, environmentId],
         {
           createWithInput: {
@@ -201,7 +185,7 @@ export const app = new Hono<{ Variables: Variables }>()
       environmentId,
     );
 
-    const actor = client.httpLogCollector.getOrCreate(
+    const actor = rivetClient().httpLogCollector.getOrCreate(
       [serviceId, environmentId],
       {
         createWithInput: {
@@ -216,20 +200,33 @@ export const app = new Hono<{ Variables: Variables }>()
 
     return c.json({ serviceInstance });
   })
-  .use("*", async (c, next) => {
-    if (c.req.path.startsWith("/api/")) {
+  .get(
+    "*",
+    async (c, next) => {
+      if (c.req.path.startsWith("/api")) {
+        return c.notFound();
+      }
       await next();
-      return;
-    }
-
-    await serveWebStatic(c, next);
-  })
-  .get("*", async (c, next) => {
-    if (c.req.path.startsWith("/api/")) {
-      return c.notFound();
-    }
-
-    return serveWebFallback(c, next);
-  });
+    },
+    serveStatic({
+      root: webDistPath,
+      rewriteRequestPath(path) {
+        return path === "/" ? "/index.html" : path;
+      },
+    }),
+  )
+  .get(
+    "*",
+    async (c, next) => {
+      if (c.req.path.startsWith("/api")) {
+        return c.notFound();
+      }
+      await next();
+    },
+    serveStatic({
+      root: webDistPath,
+      path: "/index.html",
+    }),
+  );
 
 export type AppType = typeof app;

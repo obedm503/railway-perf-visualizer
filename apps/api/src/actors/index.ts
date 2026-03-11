@@ -3,6 +3,7 @@ import pino from "pino";
 import { setup } from "rivetkit";
 import { httpLogCollector } from "./http-log-collector";
 import { env } from "../env";
+import { createClient } from "rivetkit/client";
 
 // pino level numbers to names
 const PINO_LEVELS: Record<number, string> = {
@@ -58,3 +59,13 @@ export const registry = setup({
   logging: { baseLogger },
   storagePath: env.RIVET_STORAGE_PATH,
 });
+
+let client: ReturnType<typeof createClient<typeof registry>>;
+export function rivetClient() {
+  if (!client) {
+    client = createClient<typeof registry>({
+      endpoint: env.API_ORIGIN + "/api/rivet",
+    });
+  }
+  return client;
+}
