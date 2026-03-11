@@ -1,13 +1,14 @@
 import { serve } from "bun";
+import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { initLogger, log, parseError } from "evlog";
 import { ContentfulStatusCode } from "hono/utils/http-status";
 import { app } from "./app";
-import { runMigrations } from "./db/migrate";
+import { db } from "./db/client";
 import { env } from "./env";
 
 initLogger({
   env: {
-    service: process.env.EVLOG_SERVICE ?? "railway-perf-visualizer-api",
+    service: "railway-perf-visualizer-api",
   },
   pretty: process.env.NODE_ENV !== "production",
 });
@@ -26,7 +27,7 @@ if (!env.RAILWAY_CLIENT_ID || !env.RAILWAY_CLIENT_SECRET) {
   });
 }
 
-await runMigrations();
+migrate(db, { migrationsFolder: `${import.meta.dir}/../drizzle` });
 
 log.info({
   event: "db_migrations_applied",
