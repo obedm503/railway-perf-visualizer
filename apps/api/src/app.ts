@@ -159,7 +159,7 @@ export const app = new Hono<{ Variables: Variables }>()
       const limit = limitParam ? Number(limitParam) : undefined;
 
       c.get("log").set({ logs: { serviceId, environmentId } });
-      const actor = rivetClient().httpLogCollector.getOrCreate(
+      const actor = rivetClient.httpLogCollector.getOrCreate(
         [serviceId, environmentId],
         {
           createWithInput: {
@@ -186,7 +186,7 @@ export const app = new Hono<{ Variables: Variables }>()
       environmentId,
     );
 
-    const actor = rivetClient().httpLogCollector.getOrCreate(
+    const actor = rivetClient.httpLogCollector.getOrCreate(
       [serviceId, environmentId],
       {
         createWithInput: {

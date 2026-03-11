@@ -50,18 +50,18 @@ const evlogDestination: pino.DestinationStream = {
 
 const baseLogger = pino({ level: "debug" }, evlogDestination);
 
+const RIVET_PORT = env.PORT + 1;
+
 const registry = setup({
   use: { httpLogCollector },
   logging: { baseLogger },
   storagePath: env.RIVET_STORAGE_PATH,
+  managerHost: "::",
+  managerPort: RIVET_PORT,
 });
 
 registry.startRunner();
 
-let client: ReturnType<typeof createClient<typeof registry>>;
-export function rivetClient() {
-  if (!client) {
-    client = createClient<typeof registry>();
-  }
-  return client;
-}
+export const rivetClient = createClient<typeof registry>(
+  `http://localhost:${RIVET_PORT}`,
+);
