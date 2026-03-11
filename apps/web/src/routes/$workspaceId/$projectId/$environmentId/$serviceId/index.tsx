@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/solid-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/solid-router";
+import { createFileRoute, useNavigate } from "@tanstack/solid-router";
 import * as echarts from "echarts/core";
 import { HeatmapChart, LineChart } from "echarts/charts";
 import {
@@ -35,8 +35,6 @@ import {
 import {
   fetchService,
   fetchServiceLogs,
-  fetchWorkspaces,
-  meQueryOptions,
   serviceQueryOptions,
   serviceLogsQueryOptions,
   workspacesQueryOptions,
@@ -53,15 +51,16 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-export const Route = createFileRoute("/service/$serviceId/$environmentId/")({
-  async beforeLoad({ context }) {
-    const me = await context.queryClient.ensureQueryData(meQueryOptions());
-    if (!me) {
-      throw redirect({ to: "/" });
-    }
-  },
+export const Route = createFileRoute(
+  "/$workspaceId/$projectId/$environmentId/$serviceId/",
+)({
   component: ServiceDetail,
 });
+
+type WorkspaceOption = {
+  id: string;
+  name: string;
+};
 
 type ProjectOption = {
   id: string;
@@ -71,7 +70,11 @@ type ProjectOption = {
 type EnvironmentOption = {
   id: string;
   name: string;
-  firstServiceId: string;
+};
+
+type ServiceOption = {
+  serviceId: string;
+  name: string;
 };
 
 type HistogramBucket = {
@@ -96,36 +99,6 @@ type ServiceData = NonNullable<Awaited<ReturnType<typeof fetchService>>>;
 type ServiceLogsData = NonNullable<
   Awaited<ReturnType<typeof fetchServiceLogs>>
 >;
-
-function findRouteContext(
-  workspaces: NonNullable<
-    Awaited<ReturnType<typeof fetchWorkspaces>>
-  >["workspaces"],
-  serviceId: string,
-  environmentId: string,
-) {
-  for (const workspace of workspaces) {
-    for (const project of workspace.projects) {
-      for (const environment of project.environments) {
-        if (environment.id !== environmentId) {
-          continue;
-        }
-
-        for (const service of environment.serviceInstances) {
-          if (service.serviceId === serviceId) {
-            return {
-              workspace,
-              project,
-              environment,
-            };
-          }
-        }
-      }
-    }
-  }
-
-  return null;
-}
 
 function formatTimestamp(ts: string): string {
   return new Date(ts).toLocaleString();
@@ -660,96 +633,139 @@ function ServiceHeaderControls() {
   const navigate = useNavigate();
   const workspacesQuery = useQuery(() => workspacesQueryOptions());
 
-  const routeContext = createMemo(() => {
-    const p = params();
-    const workspaces = workspacesQuery.data?.workspaces;
-    if (!workspaces || !p) {
-      return null;
-    }
+  const workspaces = createMemo(() => workspacesQuery.data?.workspaces ?? []);
 
-    return findRouteContext(workspaces, p.serviceId, p.environmentId);
-  });
+  const selectedWorkspace = createMemo(() =>
+    workspaces().find((workspace) => workspace.id === params().workspaceId),
+  );
+
+  const selectedProject = createMemo(() =>
+    selectedWorkspace()?.projects.find(
+      (project) => project.id === params().projectId,
+    ),
+  );
+
+  const selectedEnvironment = createMemo(() =>
+    selectedProject()?.environments.find(
+      (environment) => environment.id === params().environmentId,
+    ),
+  );
+
+  const workspaceOptions = createMemo<WorkspaceOption[]>(() =>
+    workspaces().map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+    })),
+  );
 
   const projectOptions = createMemo<ProjectOption[]>(() => {
-    const currentContext = routeContext();
-    if (!currentContext) {
+    const workspace = selectedWorkspace();
+    if (!workspace) {
       return [];
     }
 
-    return currentContext.workspace.projects.map((project) => ({
+    return workspace.projects.map((project) => ({
       id: project.id,
       name: project.name,
     }));
   });
 
   const environmentOptions = createMemo<EnvironmentOption[]>(() => {
-    const currentContext = routeContext();
-    if (!currentContext) {
+    const project = selectedProject();
+    if (!project) {
       return [];
     }
 
-    return currentContext.project.environments
-      .map((environment) => {
-        const firstServiceId = environment.serviceInstances[0]?.serviceId;
-        if (!firstServiceId) {
-          return null;
-        }
-
-        return {
-          id: environment.id,
-          name: environment.name,
-          firstServiceId,
-        };
-      })
-      .filter((option): option is EnvironmentOption => option !== null);
+    return project.environments.filter(
+      (environment) => environment.serviceInstances.length > 0,
+    );
   });
 
-  function onProjectChange(nextProjectId: string | null): void {
-    if (!nextProjectId) {
+  const serviceOptions = createMemo<ServiceOption[]>(() => {
+    const environment = selectedEnvironment();
+    if (!environment) {
+      return [];
+    }
+
+    return environment.serviceInstances.map((instance) => ({
+      serviceId: instance.serviceId,
+      name: instance.serviceName,
+    }));
+  });
+
+  function onWorkspaceChange(nextWorkspaceId: string | null): void {
+    if (!nextWorkspaceId || nextWorkspaceId === params().workspaceId) {
       return;
     }
 
-    const currentContext = routeContext();
-    if (!currentContext || nextProjectId === currentContext.project.id) {
-      return;
-    }
-
-    const nextProject = currentContext.workspace.projects.find(
-      (project) => project.id === nextProjectId,
+    const nextWorkspace = workspaces().find(
+      (workspace) => workspace.id === nextWorkspaceId,
     );
+    if (!nextWorkspace) {
+      return;
+    }
+
+    const nextProject = nextWorkspace.projects[0];
     if (!nextProject) {
       return;
     }
 
-    const nextEnvironment = nextProject.environments[0];
+    const nextEnvironment = nextProject.environments.find(
+      (environment) => environment.serviceInstances.length > 0,
+    );
     const nextServiceId = nextEnvironment?.serviceInstances[0]?.serviceId;
     if (!nextEnvironment || !nextServiceId) {
       return;
     }
 
     void navigate({
-      to: "/service/$serviceId/$environmentId",
+      to: "/$workspaceId/$projectId/$environmentId/$serviceId",
       params: {
-        serviceId: nextServiceId,
+        workspaceId: nextWorkspaceId,
+        projectId: nextProject.id,
         environmentId: nextEnvironment.id,
+        serviceId: nextServiceId,
+      },
+    });
+  }
+
+  function onProjectChange(nextProjectId: string | null): void {
+    if (!nextProjectId || nextProjectId === params().projectId) {
+      return;
+    }
+
+    const nextProject = selectedWorkspace()?.projects.find(
+      (project) => project.id === nextProjectId,
+    );
+    if (!nextProject) {
+      return;
+    }
+
+    const nextEnvironment = nextProject.environments.find(
+      (environment) => environment.serviceInstances.length > 0,
+    );
+    const nextServiceId = nextEnvironment?.serviceInstances[0]?.serviceId;
+    if (!nextEnvironment || !nextServiceId) {
+      return;
+    }
+
+    void navigate({
+      to: "/$workspaceId/$projectId/$environmentId/$serviceId",
+      params: {
+        workspaceId: params().workspaceId,
+        projectId: nextProjectId,
+        environmentId: nextEnvironment.id,
+        serviceId: nextServiceId,
       },
     });
   }
 
   function onEnvironmentChange(nextEnvironmentId: string | null): void {
-    if (!nextEnvironmentId) {
+    if (!nextEnvironmentId || nextEnvironmentId === params().environmentId) {
       return;
     }
 
-    const currentContext = routeContext();
-    if (
-      !currentContext ||
-      nextEnvironmentId === currentContext.environment.id
-    ) {
-      return;
-    }
-
-    const nextEnvironment = currentContext.project.environments.find(
+    const nextEnvironment = selectedProject()?.environments.find(
       (environment) => environment.id === nextEnvironmentId,
     );
     const nextServiceId = nextEnvironment?.serviceInstances[0]?.serviceId;
@@ -758,22 +774,63 @@ function ServiceHeaderControls() {
     }
 
     void navigate({
-      to: "/service/$serviceId/$environmentId",
+      to: "/$workspaceId/$projectId/$environmentId/$serviceId",
       params: {
+        workspaceId: params().workspaceId,
+        projectId: params().projectId,
+        environmentId: nextEnvironmentId,
         serviceId: nextServiceId,
-        environmentId: nextEnvironment.id,
+      },
+    });
+  }
+
+  function onServiceChange(nextServiceId: string | null): void {
+    if (!nextServiceId || nextServiceId === params().serviceId) {
+      return;
+    }
+
+    void navigate({
+      to: "/$workspaceId/$projectId/$environmentId/$serviceId",
+      params: {
+        workspaceId: params().workspaceId,
+        projectId: params().projectId,
+        environmentId: params().environmentId,
+        serviceId: nextServiceId,
       },
     });
   }
 
   return (
     <div class="flex items-center gap-1">
+      <Select<WorkspaceOption>
+        options={workspaceOptions()}
+        optionValue="id"
+        optionTextValue="name"
+        value={workspaceOptions().find(
+          (option) => option.id === params().workspaceId,
+        )}
+        onChange={(nextOption) => onWorkspaceChange(nextOption?.id ?? null)}
+        itemComponent={(props) => (
+          <SelectItem item={props.item}>{props.item.rawValue.name}</SelectItem>
+        )}
+      >
+        <SelectTrigger>
+          <SelectValue<WorkspaceOption>>
+            {(state) => state.selectedOption()?.name ?? "Workspace"}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectHiddenSelect />
+        <SelectContent />
+      </Select>
+
+      <span class="text-border">/</span>
+
       <Select<ProjectOption>
         options={projectOptions()}
         optionValue="id"
         optionTextValue="name"
         value={projectOptions().find(
-          (option) => option.id === routeContext()?.project.id,
+          (option) => option.id === params().projectId,
         )}
         onChange={(nextOption) => onProjectChange(nextOption?.id ?? null)}
         itemComponent={(props) => (
@@ -796,7 +853,7 @@ function ServiceHeaderControls() {
         optionValue="id"
         optionTextValue="name"
         value={environmentOptions().find(
-          (option) => option.id === routeContext()?.environment.id,
+          (option) => option.id === params().environmentId,
         )}
         onChange={(nextOption) => onEnvironmentChange(nextOption?.id ?? null)}
         itemComponent={(props) => (
@@ -806,6 +863,31 @@ function ServiceHeaderControls() {
         <SelectTrigger>
           <SelectValue<EnvironmentOption>>
             {(state) => state.selectedOption()?.name ?? "Environment"}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectHiddenSelect />
+        <SelectContent />
+      </Select>
+
+      <span class="text-border">/</span>
+
+      <Select<ServiceOption>
+        options={serviceOptions()}
+        optionValue="serviceId"
+        optionTextValue="name"
+        value={serviceOptions().find(
+          (option) => option.serviceId === params().serviceId,
+        )}
+        onChange={(nextOption) =>
+          onServiceChange(nextOption?.serviceId ?? null)
+        }
+        itemComponent={(props) => (
+          <SelectItem item={props.item}>{props.item.rawValue.name}</SelectItem>
+        )}
+      >
+        <SelectTrigger>
+          <SelectValue<ServiceOption>>
+            {(state) => state.selectedOption()?.name ?? "Service"}
           </SelectValue>
         </SelectTrigger>
         <SelectHiddenSelect />
@@ -1064,6 +1146,10 @@ function ServiceHeaderControlsSkeleton() {
   return (
     <div class="flex items-center gap-2">
       <Skeleton height={40} width={144} class="rounded-lg" />
+      <span class="text-border">/</span>
+      <Skeleton height={40} width={144} class="rounded-lg" />
+      <span class="text-border">/</span>
+      <Skeleton height={40} width={128} class="rounded-lg" />
       <span class="text-border">/</span>
       <Skeleton height={40} width={128} class="rounded-lg" />
     </div>

@@ -18,15 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { meQueryOptions, workspacesQueryOptions } from "~/lib/api";
+import { workspacesQueryOptions } from "~/lib/api";
 
-export const Route = createFileRoute("/$workspaceId")({
+export const Route = createFileRoute("/$workspaceId/")({
   async beforeLoad({ context, params }) {
-    const me = await context.queryClient.ensureQueryData(meQueryOptions());
-    if (!me) {
-      throw redirect({ to: "/" });
-    }
-
     const workspaceResult = await context.queryClient.ensureQueryData(
       workspacesQueryOptions(),
     );
@@ -54,6 +49,7 @@ export const Route = createFileRoute("/$workspaceId")({
 type ServiceNode = {
   serviceId: string;
   serviceName: string;
+  projectId: string;
   envId: string;
   envName: string;
 };
@@ -65,6 +61,7 @@ type WorkspaceOption = {
 };
 
 function collectProjectServiceNodes(project: {
+  id: string;
   environments: Array<{
     id: string;
     name: string;
@@ -80,6 +77,7 @@ function collectProjectServiceNodes(project: {
       nodes.push({
         serviceId: service.serviceId,
         serviceName: service.serviceName,
+        projectId: project.id,
         envId: env.id,
         envName: env.name,
       });
@@ -210,7 +208,12 @@ function WorkspaceProjectsSection() {
           >
             <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <For each={workspace().projects}>
-                {(project) => <ProjectCard project={project} />}
+                {(project) => (
+                  <ProjectCard
+                    workspaceId={params().workspaceId}
+                    project={project}
+                  />
+                )}
               </For>
             </div>
           </Show>
@@ -221,6 +224,7 @@ function WorkspaceProjectsSection() {
 }
 
 function ProjectCard(props: {
+  workspaceId: string;
   project: {
     id: string;
     name: string;
@@ -253,8 +257,10 @@ function ProjectCard(props: {
             <For each={nodes()}>
               {(node) => (
                 <Link
-                  to="/service/$serviceId/$environmentId"
+                  to="/$workspaceId/$projectId/$environmentId/$serviceId"
                   params={{
+                    workspaceId: props.workspaceId,
+                    projectId: node.projectId,
                     serviceId: node.serviceId,
                     environmentId: node.envId,
                   }}

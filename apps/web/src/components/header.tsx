@@ -43,7 +43,7 @@ function HeaderAuthActions() {
   async function onLogout() {
     await logout();
     queryClient.clear();
-    navigate({ to: "/" });
+    navigate({ to: "/login" });
   }
 
   return (

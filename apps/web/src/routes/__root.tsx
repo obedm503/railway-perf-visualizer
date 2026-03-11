@@ -1,5 +1,10 @@
 import { QueryClient } from "@tanstack/solid-query";
-import { Outlet, createRootRouteWithContext } from "@tanstack/solid-router";
+import {
+  Outlet,
+  createRootRouteWithContext,
+  redirect,
+} from "@tanstack/solid-router";
+import { meQueryOptions } from "~/lib/api";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -38,6 +43,22 @@ function RootErrorFallback(props: { error: unknown }) {
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
+  async beforeLoad({ context, location }) {
+    const me = await context.queryClient.ensureQueryData(meQueryOptions());
+
+    if (!me && location.pathname !== "/login") {
+      throw redirect({
+        to: "/login",
+        search: {
+          redirect: location.pathname === "/" ? undefined : location.pathname,
+        },
+      });
+    }
+
+    if (me && location.pathname === "/login") {
+      throw redirect({ to: "/" });
+    }
+  },
   component: RootComponent,
   onError(err) {
     console.error(err);
