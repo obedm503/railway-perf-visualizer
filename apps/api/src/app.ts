@@ -7,7 +7,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registry, rivetClient } from "./actors";
+import { rivetClient } from "./actors";
 import { auth } from "./auth";
 import type { UserRow } from "./db/schema";
 import { env } from "./env";
@@ -76,13 +76,14 @@ export const app = new Hono<{ Variables: Variables }>()
     }),
   )
   .use(requestLoggingMiddleware)
-  .all("/api/rivet/*", (c) => registry.handler(c.req.raw))
   .use("/api/*", async (c, next) => {
     const sessionId = getCookie(c, sessionCookieName) ?? null;
     const authSession = await auth.resolveSession(sessionId);
     const accessToken =
       authSession.user && (await auth.getAccessToken(authSession.user.id));
-    c.get("log").set({ accessToken });
+    if (process.env.NODE_ENV !== "production") {
+      c.get("log").set({ accessToken });
+    }
     c.set(
       "user",
       authSession.user && accessToken

@@ -16,12 +16,8 @@ const PINO_LEVELS: Record<number, string> = {
 };
 
 function forwardToEvlog(o: Record<string, unknown>) {
-  const { msg, time, pid, hostname, level, ...rest } = o;
-  const event: Record<string, unknown> = { ...rest };
-  if (msg) {
-    event.msg = msg;
-  }
-  event.source = "rivetkit";
+  const { time, pid, hostname, level, ...rest } = o;
+  const event: Record<string, unknown> = { source: "rivetkit", ...rest };
 
   const levelName = PINO_LEVELS[level as number] ?? "info";
   switch (levelName) {
@@ -54,18 +50,18 @@ const evlogDestination: pino.DestinationStream = {
 
 const baseLogger = pino({ level: "debug" }, evlogDestination);
 
-export const registry = setup({
+const registry = setup({
   use: { httpLogCollector },
   logging: { baseLogger },
   storagePath: env.RIVET_STORAGE_PATH,
 });
 
+registry.startRunner();
+
 let client: ReturnType<typeof createClient<typeof registry>>;
 export function rivetClient() {
   if (!client) {
-    client = createClient<typeof registry>({
-      endpoint: env.API_ORIGIN + "/api/rivet",
-    });
+    client = createClient<typeof registry>();
   }
   return client;
 }

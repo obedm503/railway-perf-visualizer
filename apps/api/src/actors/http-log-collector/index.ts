@@ -1,4 +1,5 @@
 import { and, desc, gte, lt, lte, sql } from "drizzle-orm";
+import { log } from "evlog";
 import { actor, ActorDefinition } from "rivetkit";
 import { db } from "rivetkit/db/drizzle";
 import { workflow } from "rivetkit/workflow";
@@ -51,7 +52,13 @@ const collector = actor({
         // 1. Get access token
         const accessToken = await auth.getAccessToken(userId);
         if (!accessToken) {
-          loopCtx.log.warn({ msg: "No access token available", userId });
+          loopCtx.log.error({
+            msg: "No access token available",
+            actorId: ctx.actorId,
+            serviceId,
+            environmentId,
+            userId,
+          });
           return;
         }
 
@@ -67,12 +74,22 @@ const collector = actor({
           loopCtx.log.error({
             msg: "Failed to fetch deployments",
             error,
+            actorId: ctx.actorId,
+            serviceId,
+            environmentId,
+            userId,
           });
           return;
         }
 
         if (deployments.length === 0) {
-          loopCtx.log.info({ msg: "No deployments in the last 7 days" });
+          loopCtx.log.info({
+            msg: "No deployments in the last 7 days",
+            actorId: ctx.actorId,
+            serviceId,
+            environmentId,
+            userId,
+          });
           return;
         }
 
@@ -147,14 +164,22 @@ const collector = actor({
 
             loopCtx.log.info({
               msg: "Fetched logs for deployment",
+              actorId: ctx.actorId,
               deploymentId: deployment.id,
               count: logs.length,
+              serviceId,
+              environmentId,
+              userId,
             });
           } catch (error) {
             loopCtx.log.error({
               msg: "Failed to fetch logs for deployment",
-              deploymentId: deployment.id,
               error,
+              actorId: ctx.actorId,
+              serviceId,
+              environmentId,
+              userId,
+              deploymentId: deployment.id,
             });
           }
         }
@@ -192,6 +217,10 @@ const collector = actor({
             msg: "Computed histograms",
             windowCount: windowHistograms.length,
             logCount: totalInserted,
+            actorId: ctx.actorId,
+            serviceId,
+            environmentId,
+            userId,
           });
         }
 

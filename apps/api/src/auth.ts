@@ -349,7 +349,6 @@ export const auth = {
         configuration,
         identity.refreshToken,
       );
-      console.log("getAccessToken", { tokenSet });
 
       if (!tokenSet.access_token) {
         return null;
