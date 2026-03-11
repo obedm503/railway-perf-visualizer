@@ -56,5 +56,5 @@ const baseLogger = pino({ level: "debug" }, evlogDestination);
 export const registry = setup({
   use: { httpLogCollector },
   logging: { baseLogger },
-  storagePath: env.RIVET_PATH,
+  storagePath: env.RIVET_STORAGE_PATH,
 });
