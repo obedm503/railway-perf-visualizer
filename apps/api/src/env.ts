@@ -1,3 +1,5 @@
+import type { LogLevel } from "rivetkit/log";
+
 const PORT = Number(process.env.PORT ?? 8787);
 export const env = {
   PORT,
@@ -10,4 +12,5 @@ export const env = {
   RAILWAY_CLIENT_ID: process.env.RAILWAY_CLIENT_ID,
   RAILWAY_CLIENT_SECRET: process.env.RAILWAY_CLIENT_SECRET,
   RIVET_STORAGE_PATH: process.env.RIVET_STORAGE_PATH,
+  RIVET_LOG_LEVEL: process.env.RIVET_LOG_LEVEL as LogLevel | undefined,
 };

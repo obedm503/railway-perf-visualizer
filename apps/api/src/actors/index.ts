@@ -52,9 +52,13 @@ const baseLogger = pino({ level: "debug" }, evlogDestination);
 
 const registry = setup({
   use: { httpLogCollector },
-  logging: { baseLogger, level: "debug" },
+  logging: {
+    baseLogger,
+    level: env.RIVET_LOG_LEVEL,
+  },
   storagePath: env.RIVET_STORAGE_PATH,
   serveManager: true,
+  maxOutgoingMessageSize: 335_544_320, // 32 MiB max
 });
 
 export const rivetClient = createClient<typeof registry>();
